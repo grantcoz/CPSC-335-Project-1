@@ -1,9 +1,13 @@
 import random
-import time
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from matplotlib.widgets import RadioButtons, Button
 
-def BubbleSort(arr):
+# -----------------------------
+# Sorting frame generators
+# -----------------------------
+
+def Bubblesort(arr):
     a = arr.copy()
     n = len(a)
     for i in range(n):
@@ -12,119 +16,266 @@ def BubbleSort(arr):
             if a[j] > a[j + 1]:
                 a[j], a[j + 1] = a[j + 1], a[j]
                 swapped = True
-                yield a
+                yield a.copy()
         if not swapped:
             break
 
-def MergeSort(arr):
-    if len(arr) > 1:
-        mid = len(arr) // 2
-        L = arr[:mid]
-        R = arr[mid:]
+def MergeSort(arr, start=0, end=None):
+    if end is None:
+        end = len(arr)
+    if end - start <= 1:
+        return
 
-        MergeSort(L)
-        MergeSort(R)
+    mid = (start + end) // 2
+    yield from MergeSort(arr, start, mid)
+    yield from MergeSort(arr, mid, end)
 
-        i = j = k = 0
-        while i < len(L) and j < len(R):
-            if L[i] < R[j]:
-                arr[k] = L[i]; i += 1
-            else:
-                arr[k] = R[j]; j += 1
-            k += 1
+    left = arr[start:mid]
+    right = arr[mid:end]
 
-        while i < len(L):
-            arr[k] = L[i]; i += 1; k += 1
-        while j < len(R):
-            arr[k] = R[j]; j += 1; k += 1
-    return arr
+    i = j = 0
+    k = start
 
-def QuickSort(arr):
-    if len(arr) <= 1:
-        return arr
-    pivot = arr[len(arr) // 2]
-    left = [x for x in arr if x < pivot]
-    middle = [x for x in arr if x == pivot]
-    right = [x for x in arr if x > pivot]
-    return QuickSort(left) + middle + QuickSort(right)
+    while i < len(left) and j < len(right):
+        if left[i] < right[j]:
+            arr[k] = left[i]
+            i += 1
+        else:
+            arr[k] = right[j]
+            j += 1
+        k += 1
+        yield arr.copy()
 
-def counting_sort(arr, exp):
-    n = len(arr)
-    output = [0] * n
-    count = [0] * 10
+    while i < len(left):
+        arr[k] = left[i]
+        i += 1
+        k += 1
+        yield arr.copy()
 
-    for i in range(n):
-        digit = (arr[i] // exp) % 10
-        count[digit] += 1
+    while j < len(right):
+        arr[k] = right[j]
+        j += 1
+        k += 1
+        yield arr.copy()
 
-    for i in range(1, 10):
-        count[i] += count[i - 1]
+def QuickSort(arr, lo=0, hi=None):
+    # In-place QuickSort with yields after swaps
+    a = arr
+    if hi is None:
+        hi = len(a) - 1
 
-    i = n - 1
-    while i >= 0:
-        digit = (arr[i] // exp) % 10
-        output[count[digit] - 1] = arr[i]
-        count[digit] -= 1
-        i -= 1
+    def partition(l, r):
+        pivot = a[r]
+        i = l - 1
+        for j in range(l, r):
+            if a[j] <= pivot:
+                i += 1
+                if i != j:
+                    a[i], a[j] = a[j], a[i]
+                    yield a.copy()
+        if i + 1 != r:
+            a[i + 1], a[r] = a[r], a[i + 1]
+            yield a.copy()
+        return i + 1
 
-    for i in range(n):
-        arr[i] = output[i]
+    if lo < hi:
+        # partition yields frames; we need pivot index too
+        # so we run partition manually
+        gen = partition(lo, hi)
+        pivot_index = None
+        try:
+            while True:
+                frame = next(gen)
+                yield frame
+        except StopIteration as e:
+            pivot_index = e.value  # partition return
+        if pivot_index is None:
+            # fallback: compute pivot index directly if python doesn't carry return (rare)
+            pivot_index = lo
+
+        yield from QuickSort(a, lo, pivot_index - 1)
+        yield from QuickSort(a, pivot_index + 1, hi)
 
 def RadixSort(arr):
-    if not arr:
-        return arr
-    if min(arr) < 0:
-        raise ValueError("RadixSort here assumes non-negative integers only.")
-    max_num = max(arr)
+    a = arr.copy()
+    if not a:
+        return
+    if min(a) < 0:
+        raise ValueError("Radix sort here assumes non-negative integers only.")
+
+    def counting(exp):
+        n = len(a)
+        output = [0] * n
+        count = [0] * 10
+
+        for v in a:
+            digit = (v // exp) % 10
+            count[digit] += 1
+        for i in range(1, 10):
+            count[i] += count[i - 1]
+
+        for i in range(n - 1, -1, -1):
+            digit = (a[i] // exp) % 10
+            output[count[digit] - 1] = a[i]
+            count[digit] -= 1
+
+        for i in range(n):
+            a[i] = output[i]
+            yield a.copy()  # yield after each write-back for animation
+
+    max_num = max(a)
     exp = 1
     while max_num // exp > 0:
-        counting_sort(arr, exp)
+        yield from counting(exp)
         exp *= 10
-    return arr
 
-def LinearSearch(arr, target):
-    for i in range(len(arr)):
-        if arr[i] == target:
-            return i
-    return -1
+# Map names -> generator builder
+ALGO_BUILDERS = {
+    "Bubble": lambda data: Bubblesort(data),
+    "Merge":  lambda data: MergeSort(data),
+    "Quick":  lambda data: QuickSort(data, 0, len(data) - 1),
+    "Radix":  lambda data: RadixSort(data),
+}
 
-# --- timing helper ---
-def time_call(fn, data, repeats=3):
-    best = float("inf")
-    for _ in range(repeats):
-        arr = data.copy()
-        t0 = time.perf_counter()
-        out = fn(arr)  # some return new list, some sort in place; either is fine for timing
-        _ = out
-        best = min(best, time.perf_counter() - t0)
-    return best
+# -----------------------------
+# UI + Animation
+# -----------------------------
 
-if __name__ == "__main__":
-    
-    data = [random.randint(1, 100) for _ in range(30)]
-   
-    # data = [64, 34, 25, 12, 22, 11, 90]
-    steps = BubbleSort(data)
+N = 35
+LOW, HIGH = 1, 100
 
-    fig, ax = plt.subplots()
-    bars = ax.bar(range(len(data)), data)
-    ax.set_title("Bubble Sort Visualization")
-    ax.set_ylim(0, max(data) * 1.1)
-    
-    final_state = data.copy()
-    
-    def update(_):
-        global final_state
-        nxt = next(steps, None)     # None means “no more steps”
-        if nxt is not None:
-            final_state = nxt
-        # always draw final_state (sorted at the end)
-        for bar, val in zip(bars, final_state):
-            bar.set_height(val)
+data = [random.randint(LOW, HIGH) for _ in range(N)]
+original_data = data.copy()
+
+selected_algo = "Bubble"
+anim = None
+is_running = False
+
+fig, ax = plt.subplots()
+plt.subplots_adjust(left=0.28, right=0.98, top=0.92, bottom=0.08)
+
+bars = ax.bar(range(N), data)
+ax.set_title("Sorting Visualizer")
+ax.set_ylim(0, HIGH * 1.1)
+
+# Radio buttons panel
+rax = plt.axes([0.04, 0.55, 0.20, 0.35])
+radio = RadioButtons(rax, list(ALGO_BUILDERS.keys()))
+radio.set_active(0)
+
+# Buttons
+ax_start = plt.axes([0.04, 0.45, 0.20, 0.07])
+btn_start = Button(ax_start, "Start")
+
+ax_reset = plt.axes([0.04, 0.36, 0.20, 0.07])
+btn_reset = Button(ax_reset, "Reset")
+
+ax_new = plt.axes([0.04, 0.27, 0.20, 0.07])
+btn_new = Button(ax_new, "New Data")
+
+status_text = ax.text(0.02, 0.98, "", transform=ax.transAxes, va="top")
+
+def draw_array(arr):
+    for bar, val in zip(bars, arr):
+        bar.set_height(val)
+    return bars
+
+def on_select(label):
+    global selected_algo
+    if is_running:
+        return
+    selected_algo = label
+    status_text.set_text(f"Selected: {selected_algo}")
+    fig.canvas.draw_idle()
+
+radio.on_clicked(on_select)
+
+def start_animation(_event):
+    global anim, is_running, data
+
+    if is_running:
+        return
+
+    # Build frames based on selection
+    working = data.copy()
+
+    try:
+        frames = ALGO_BUILDERS[selected_algo](working)
+    except Exception as e:
+        status_text.set_text(f"Error: {e}")
+        fig.canvas.draw_idle()
+        return
+
+    is_running = True
+    status_text.set_text(f"Running: {selected_algo}")
+
+    def update(frame_arr):
+        # frame_arr is the yielded array state
+        draw_array(frame_arr)
         return bars
 
-    anim = FuncAnimation(fig, func=lambda _: update(next(steps, data)),
-                         frames=200, interval=50, blit=False, repeat=False)
-    plt.show()
-    
-    
+    def on_done(_):
+        # Not always called reliably; we’ll also stop by catching generator end
+        pass
+
+    # Important: use frames=generator so it stops when generator ends
+    anim = FuncAnimation(fig, update, frames=frames, interval=50, repeat=False)
+
+    # When the generator ends, matplotlib stops requesting frames; mark not running
+    # We can detect this by hooking into draw events with a small trick:
+    def mark_finished(event):
+        # If animation exists but isn't actively iterating anymore,
+        # this draw event typically fires at the end too.
+        # We'll just allow Reset/New to work regardless.
+        pass
+
+    fig.canvas.draw_idle()
+
+    # We can’t perfectly detect end without extra plumbing;
+    # easiest: allow Reset/New at any time, and block only Start during run.
+    # Also: after some time, Start will work again once animation naturally ends.
+    # To make it explicit, you can just hit Reset/New to stop visually.
+
+    # Schedule “unlock” by using the animation event source callback:
+    # (when repeat=False and frames are exhausted, it stops.)
+    if anim.event_source is not None:
+        old_stop = anim.event_source.stop
+        def wrapped_stop():
+            global is_running
+            is_running = False
+            status_text.set_text(f"Done: {selected_algo}")
+            fig.canvas.draw_idle()
+            old_stop()
+        anim.event_source.stop = wrapped_stop
+
+def reset(_event):
+    global anim, is_running, data, original_data
+
+    if anim is not None and anim.event_source is not None:
+        anim.event_source.stop()
+    is_running = False
+
+    data = original_data.copy()
+    draw_array(data)
+    status_text.set_text(f"Reset (Selected: {selected_algo})")
+    fig.canvas.draw_idle()
+
+def new_data(_event):
+    global anim, is_running, data, original_data
+
+    if anim is not None and anim.event_source is not None:
+        anim.event_source.stop()
+    is_running = False
+
+    data = [random.randint(LOW, HIGH) for _ in range(N)]
+    original_data = data.copy()
+    draw_array(data)
+    status_text.set_text(f"New data (Selected: {selected_algo})")
+    fig.canvas.draw_idle()
+
+btn_start.on_clicked(start_animation)
+btn_reset.on_clicked(reset)
+btn_new.on_clicked(new_data)
+
+status_text.set_text(f"Selected: {selected_algo}")
+plt.show()
