@@ -27,6 +27,7 @@ def Bubblesort(arr):                          # define Bubble Sort as a generato
     - O(1) auxiliary (in-place). For animation we yield copies (extra memory for frames).
     """
     a = arr.copy()                            # copy input so we don’t mutate the caller’s list
+    yield a.copy()                            # yield initial state for animation
     n = len(a)                                # store number of elements for loop bounds
     for i in range(n):                        # outer pass loop (each pass pushes one large value to end)
         swapped = False                       # flag to detect if this pass made any swaps
@@ -531,7 +532,8 @@ def start_animation(_event):                  # called when Start button is clic
         status_text.set_text(f"Done: {selected_algo} | {data_condition} | n={len(data)} | {elapsed:.6f}s")  # show result
         fig.canvas.draw_idle()                # redraw to show updated status
 
-    def frames():                             # wrapper generator that triggers on_finish at the end
+    def frames():   
+        yield working.copy()                  # wrapper generator that triggers on_finish at the end
         for frame in gen:                     # yield each frame from the algorithm generator
             yield frame                       # forward frame to FuncAnimation
         on_finish()                           # once generator ends, update status and flags
